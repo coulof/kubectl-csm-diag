@@ -1,0 +1,84 @@
+#!/bin/bash
+
+# optional argument handling
+if [[ "$1" == "version" ]]
+then
+	echo "1.0.0"
+	exit 0
+fi
+
+# optional argument handling
+if [[ "$1" == "config" ]]
+then
+	echo "$KUBECONFIG"
+	exit 0
+fi
+
+# Help function display command usage
+function help(){
+	echo "Usage: kubectl csm-diag [options]"
+	echo ""
+}
+
+function check_prereq() {
+	if ! command -v zip &> /dev/null; then
+		echo "zip could not be found. Please install it"
+		exit 1
+	fi
+	if ! command -v jw &> /dev/null; then
+		echo "jq could not be found. Please install jq, jq is magic!"
+		exit 1
+	fi
+}
+declare -a available_namespaces
+
+# Have a bash function to look if a namespace is present from a list
+function get_namespaces() {
+	namespaces_to_check=("$@")
+	available_namespaces=() 
+	# Loop through each namespace in the list
+	for ns in "${namespaces_to_check[@]}"; do
+		# Check if the namespace exists using `kubectl get namespace`
+		if kubectl get namespace "$ns" > /dev/null 2>&1; then
+			available_namespaces+=("$ns") # Add to the list of available namespaces
+		fi
+	done
+}
+
+# Check pre-requisites
+check_prereq
+
+# Prepare tmpdir for archive
+
+tempdir=$(mktemp -d)
+echo $tempdir
+
+# Collect node information
+echo "Nodes Information:" > "$tempdir/node_info.log"
+nodes=$(kubectl get nodes --selector='!node-role.kubernetes.io/master' -o jsonpath='{.items[*].metadata.name}')
+for node in $nodes; do
+	labelFound=false
+	for driver in "${csiDriver[@]}"; do
+		labels=$(kubectl get node "$node" -o jsonpath="{.metadata.labels}")
+		matches=$(echo "$labels" | grep -o "${driver}[^ ,]*" | sed 's/^/    - /')
+		if [ ! -z "$matches" ]; then
+			echo "- Name: $node" >> "$outputFile""$tempdir/node_info.log"
+			echo "  Labels containing '${driver}':" >> "$outputFile"
+			echo "$matches" >> "$outputFile"
+			echo "" >> "$outputFile"  # Add a blank line for readability
+			labelFound=true
+			break  # Stop checking if a label is found
+		fi
+	done
+	if [ "$labelFound" = false ]; then
+		echo "- Name: $node" >> "$tempdir/node_info.log"
+		echo "  Labels containing CSI driver: None" >> "$tempdir/node_info.log"
+		echo "" >> "$tempdir/node_info.log"
+	fi
+done
+
+# kubectl get pods --all-namespaces -o json | jq -r '.items[] | select(any(.spec.containers[]; any(.env[]; .value == "/var/run/csi/csi.sock"))) | "\(.metadata.namespace) \(.metadata.name)"'
+
+
+echo "CSINodes Information:" >> "$tempdir/csinode.yaml"
+kubectl get csinode -o yaml >> "$tempdir/csinode.yaml"
