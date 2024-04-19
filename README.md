@@ -16,6 +16,14 @@ Or
 kubectl-csm-diag --namespace dell-csm-operator,powerflex
 ```
 
+## Archive content
+The script create an archive (zip or tar) containing:
+* The list of pods : pods-list.log
+* Pods and container logs for the matching namespaces
+* `storage.dell.com` CRs
+* Helm `values.yaml`
+* `StorageClass`, `Node` & `CSINodes` details
+
 ## TODO
-* [] Add command options parsing
-* [] Find a selector to identify CSI Drivers
+* [x] Add command options parsing
+* [ ] Replace selection by namespace with a selector. Need to find a selector to identify CSI Drivers...
