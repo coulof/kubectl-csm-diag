@@ -8,6 +8,8 @@ usual_namespaces="powerflex,vxflexos,powermax,powerscale,isilon,unity,powerstore
 
 tempdir=$(mktemp -d)
 
+verbose=0
+
 function cleanup() {
 	rm -rf "$tempdir"
 }
@@ -15,6 +17,12 @@ function cleanup() {
 # Set up a trap to call cleanup when the script exits or is interrupted
 trap cleanup EXIT INT TERM
 
+# Function to handle verbose output
+log_verbose() {
+	if [[ $verbose -eq 1 ]]; then
+		echo "$@"
+	fi
+}
 # Help function display command usage
 function help(){
 	cat << EOF
@@ -27,7 +35,8 @@ Options:
 		   Namespace are comma-separated
 		   It not defined it will look through commonly used namespaces : $usual_namespaces
   -s               Include secrets in the output (false by default)
-  -h, --help       Display this help and exit.
+  -v               Verbose mode that tells every step
+  -h               Display this help and exit.
 EOF
 }
 
@@ -47,11 +56,13 @@ function handle_namespaces {
 function get_namespaces() {
 	IFS=',' read -ra NAMESPACE_ARRAY <<< "$1"
 	available_namespaces=() 
+	log_verbose "Namespace array: ${NAMESPACE_ARRAY[*]}"
 	# Loop through each namespace in the list
 	# TODO : replace this block with a single query & jq parser for faster execution
 	for ns in "${NAMESPACE_ARRAY[@]}"; do
 		# Check if the namespace exists using `kubectl get namespace`
 		if kubectl get namespace "$ns" > /dev/null 2>&1; then
+			log_verbose "Namespace $ns exists"
 			available_namespaces+=("$ns") # Add to the list of available namespaces
 		fi
 	done
@@ -68,12 +79,15 @@ function get_namespaces() {
 
 
 function get_node_info(){
+	log_verbose "Collecting node info"
 	kubectl get nodes -o yaml >> "$tempdir/nodes.yaml"
 	kubectl get csinode -o yaml >> "$tempdir/csinodes.yaml"
 }
 
 function get_dell_sc(){
+	log_verbose "Collecting Dell storage classes"
 	scs=$(kubectl get sc | awk '/dellemc.com/ {print $1}')
+	log_verbose "Dell storage classes: $scs"
 	for sc in $scs; do
 		kubectl get sc "$sc" -o yaml >> "$tempdir/sc-$sc.yaml"
 	done
@@ -81,14 +95,18 @@ function get_dell_sc(){
 
 function helm_deployment_details(){
 	# check if helm command is present
+	log_verbose "Checking for helm deployments"
 	if command -v helm &> /dev/null; then
 		for ns in "${available_namespaces[@]}"; do
 			releases=$(helm ls -n "$ns" --short)
 			if [ -z "$releases" ]; then
+				log_verbose "No helm releases found in namespace $ns"
 				echo "No helm releases found in namespace $ns" >> "$tempdir/deployment-method.yaml"
 			else
+				log_verbose "Helm releases found in namespace $ns: $releases"
 				echo "Helm releases found in namespace $ns" >> "$tempdir/deployment-method.yaml"
 				for release in $releases; do
+					log_verbose "Helm get values for release $release in namespace $ns"
 					helm get values "$release" -n "$ns" -o yaml >> "$tempdir/values-$release.yaml"
 				done
 			fi
@@ -97,11 +115,14 @@ function helm_deployment_details(){
 }
 
 function operator_deployment_details(){
-	# check if we have
+	log_verbose "Checking for operator deployments"
+	# check if we have Dell CRDs
 	crds=$(kubectl get crd | awk '/storage.dell.com/ {print $1}')
 	if [ -z "$crds" ]; then
+		log_verbose "No CRDs found"
 		echo "No CRDs found" >> "$tempdir/deployment-method.yaml"
 	else
+		log_verbose "CRDs found: $crds"
 		echo "CRDs found: $crds" >> "$tempdir/deployment-method.yaml"
 		for crd in $crds; do
 			kubectl get "$crd" -A -o yaml >> "$tempdir/crd-$crd.yaml"
@@ -110,20 +131,25 @@ function operator_deployment_details(){
 }
 
 function get_pod_logs(){
+	log_verbose "Collecting pod logs"
 	for ns in "${available_namespaces[@]}"; do
 		pods=$(kubectl get pods -n "$ns" -o jsonpath='{.items[*].metadata.name}')
+		log_verbose "Pods found in namespace $ns: $pods"
 		# TODO add loop for each container later
 		echo "Pods found in namespace $ns: $pods" >> "$tempdir/pods-list.log"
 		for pod in $pods; do
-			kubectl logs "$pod" -n "$ns" >> "$tempdir/$ns-$pod.log"
+			# TODO add loop for each container later
+			kubectl logs "$pod" -n "$ns" --all-containers >> "$tempdir/$ns-$pod.log"
 		done
 	done
 }
 
 # Obtain secrets
 function get_secrets(){
+	log_verbose "Collecting secrets"
 	for ns in "${available_namespaces[@]}"; do
 		secrets=$(kubectl get secrets -n "$ns" | awk '/Opaque/ {print $1}')
+		log_verbose "Secrets found in namespace $ns: $secrets"
 		for secret in $secrets; do
 			echo "---" >> "$tempdir/secrets-$ns.yaml"
 			kubectl get secret -n "$ns" "$secret" -o yaml >> "$tempdir/secrets-$ns.yaml"
@@ -131,10 +157,14 @@ function get_secrets(){
 	done
 }
 function archive(){
+	log_verbose "Creating archive"
+	archive_name="csm-diag-$(date +%s)"
 	if command -v zip &> /dev/null; then
-		zip -r "csm-diag-$(date +%s).zip" "$tempdir"
+		zip -r "$archive_name.zip" "$tempdir"
+		log_verbose "Archive created with name $archive_name.zip"
 	else
-		tar -cf "csm-diag-$(date +%s).tar.gz" "$tempdir"
+		tar -cf "$archive_name.tar" "$tempdir"
+		log_verbose "Archive created with name $archive_name.tar"
 	fi
 }
 # main function for the script execution
@@ -143,21 +173,30 @@ function main(){
 	local namespaces=""
 	local include_secrets_enabled=false
 
-	while getopts ":n:s" opt; do
+	while getopts ":n:hsv" opt; do
 		case $opt in
+			h)  # Help option
+				help
+				exit 0
+				;;
 			n)
 				namespaces="$OPTARG"
 				;;
 			s)
 				include_secrets_enabled="true"
 				;;
+			v)  # Verbose option
+				verbose=1
+				;;
 			\?)
 				echo "Invalid option: -$OPTARG" >&2
+				help
 				exit 1
 				;;
 		esac
 	done
 
+	log_verbose "Verbose mode enabled."
 	if [ -z "$namespaces" ]; then
 		get_namespaces $usual_namespaces
 	else
@@ -178,6 +217,7 @@ function main(){
 	operator_deployment_details
 
 	get_pod_logs
+
 	if [ "$include_secrets_enabled" = true ]; then
 		get_secrets
 	fi
