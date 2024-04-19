@@ -9,7 +9,7 @@ usual_namespaces="powerflex,vxflexos,powermax,powerscale,isilon,unity,powerstore
 tempdir=$(mktemp -d)
 
 function cleanup() {
-  rm -rf "$temp_dir"
+  rm -rf "$tempdir"
 }
 
 # Set up a trap to call cleanup when the script exits or is interrupted
