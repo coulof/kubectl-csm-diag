@@ -9,7 +9,7 @@ usual_namespaces="powerflex,vxflexos,powermax,powerscale,isilon,unity,powerstore
 tempdir=$(mktemp -d)
 
 function cleanup() {
-  rm -rf "$tempdir"
+	rm -rf "$tempdir"
 }
 
 # Set up a trap to call cleanup when the script exits or is interrupted
@@ -23,10 +23,11 @@ Usage: $0 [options]...
 This script performs a greeting function based on the provided options.
 
 Options:
-  -n, --namespace ns1,ns2       It will capture the pod logs for all defined namespaces
-                                Namespace are comma-separated
-                                It not defined it will look through commonly used namespaces : $usual_namespaces
-  -h, --help                    Display this help and exit.
+  -n ns1,ns2       It will capture the pod logs for all defined namespaces
+		   Namespace are comma-separated
+		   It not defined it will look through commonly used namespaces : $usual_namespaces
+  -s               Include secrets in the output (false by default)
+  -h, --help       Display this help and exit.
 EOF
 }
 
@@ -58,10 +59,10 @@ function get_namespaces() {
 
 
 #function check_prereqs() {
-	#	if ! command -v jw &> /dev/null; then
-	#		echo "jq could not be found. Please install jq, jq is magic!"
-	#		exit 1
-	#	fi
+#	if ! command -v jw &> /dev/null; then
+#		echo "jq could not be found. Please install jq, jq is magic!"
+#		exit 1
+#	fi
 #}
 
 
@@ -119,6 +120,16 @@ function get_pod_logs(){
 	done
 }
 
+# Obtain secrets
+function get_secrets(){
+	for ns in "${available_namespaces[@]}"; do
+		secrets=$(kubectl get secrets -n "$ns" | awk '/Opaque/ {print $1}')
+		for secret in $secrets; do
+			echo "---" >> "$tempdir/secrets-$ns.yaml"
+			kubectl get secret -n "$ns" "$secret" -o yaml >> "$tempdir/secrets-$ns.yaml"
+		done
+	done
+}
 function archive(){
 	if command -v zip &> /dev/null; then
 		zip -r "csm-diag-$(date +%s).zip" "$tempdir"
@@ -129,12 +140,16 @@ function archive(){
 # main function for the script execution
 function main(){
 	# Default to calling handle_namespaces if no namespaces provided
-	NAMESPACES=""
+	local namespaces=""
+	local include_secrets_enabled=false
 
-	while getopts ":n:" opt; do
+	while getopts ":n:s" opt; do
 		case $opt in
 			n)
-				NAMESPACES="$OPTARG"
+				namespaces="$OPTARG"
+				;;
+			s)
+				include_secrets_enabled="true"
 				;;
 			\?)
 				echo "Invalid option: -$OPTARG" >&2
@@ -143,10 +158,10 @@ function main(){
 		esac
 	done
 
-	if [ -z "$NAMESPACES" ]; then
+	if [ -z "$namespaces" ]; then
 		get_namespaces $usual_namespaces
 	else
-		handle_namespaces "$NAMESPACES"
+		handle_namespaces "$namespaces"
 	fi
 	if [ -z "$available_namespaces" ]; then 
 		echo "Could not find any matching namespace"
@@ -163,6 +178,9 @@ function main(){
 	operator_deployment_details
 
 	get_pod_logs
+	if [ "$include_secrets_enabled" = true ]; then
+		get_secrets
+	fi
 
 	archive
 
