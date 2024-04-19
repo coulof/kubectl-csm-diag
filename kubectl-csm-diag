@@ -1,43 +1,54 @@
 #!/bin/bash
 
-# optional argument handling
-if [[ "$1" == "version" ]]
-then
-	echo "1.0.0"
-	exit 0
-fi
 
-# optional argument handling
-if [[ "$1" == "config" ]]
-then
-	echo "$KUBECONFIG"
-	exit 0
-fi
+# Global variable
+declare -a available_namespaces
+
+usual_namespaces="powerflex,vxflexos,powermax,powerscale,isilon,unity,powerstore,dell-csm,karavi,dell-csm-operator"
+
+tempdir=$(mktemp -d)
+
+function cleanup() {
+  rm -rf "$temp_dir"
+}
+
+# Set up a trap to call cleanup when the script exits or is interrupted
+trap cleanup EXIT INT TERM
 
 # Help function display command usage
 function help(){
-	echo "Usage: kubectl csm-diag [options]"
-	echo ""
+	cat << EOF
+Usage: $0 [options]...
+
+This script performs a greeting function based on the provided options.
+
+Options:
+  -n, --namespace ns1,ns2       It will capture the pod logs for all defined namespaces
+                                Namespace are comma-separated
+                                It not defined it will look through commonly used namespaces : $usual_namespaces
+  -h, --help                    Display this help and exit.
+EOF
 }
 
-function check_prereq() {
-	if ! command -v zip &> /dev/null; then
-		echo "zip could not be found. Please install it"
-		exit 1
-	fi
-	if ! command -v jw &> /dev/null; then
-		echo "jq could not be found. Please install jq, jq is magic!"
-		exit 1
-	fi
-}
-declare -a available_namespaces
 
-# Have a bash function to look if a namespace is present from a list
+# Handle namespaces passed as argument option
+function handle_namespaces {
+	IFS=',' read -ra NAMESPACE_ARRAY <<< "$1"
+	available_namespaces=()
+	for namespace in "${NAMESPACE_ARRAY[@]}"; do
+		echo "Namespace: $namespace"
+		available_namespaces+=("$ns") # Add to the list of available namespaces
+	done
+}
+
+
+# Handle namespaces using usual suspects
 function get_namespaces() {
-	namespaces_to_check=("$@")
+	IFS=',' read -ra NAMESPACE_ARRAY <<< "$1"
 	available_namespaces=() 
 	# Loop through each namespace in the list
-	for ns in "${namespaces_to_check[@]}"; do
+	# TODO : replace this block with a single query & jq parser for faster execution
+	for ns in "${NAMESPACE_ARRAY[@]}"; do
 		# Check if the namespace exists using `kubectl get namespace`
 		if kubectl get namespace "$ns" > /dev/null 2>&1; then
 			available_namespaces+=("$ns") # Add to the list of available namespaces
@@ -45,40 +56,117 @@ function get_namespaces() {
 	done
 }
 
-# Check pre-requisites
-check_prereq
 
-# Prepare tmpdir for archive
+#function check_prereqs() {
+	#	if ! command -v jw &> /dev/null; then
+	#		echo "jq could not be found. Please install jq, jq is magic!"
+	#		exit 1
+	#	fi
+#}
 
-tempdir=$(mktemp -d)
-echo $tempdir
 
-# Collect node information
-echo "Nodes Information:" > "$tempdir/node_info.log"
-nodes=$(kubectl get nodes --selector='!node-role.kubernetes.io/master' -o jsonpath='{.items[*].metadata.name}')
-for node in $nodes; do
-	labelFound=false
-	for driver in "${csiDriver[@]}"; do
-		labels=$(kubectl get node "$node" -o jsonpath="{.metadata.labels}")
-		matches=$(echo "$labels" | grep -o "${driver}[^ ,]*" | sed 's/^/    - /')
-		if [ ! -z "$matches" ]; then
-			echo "- Name: $node" >> "$outputFile""$tempdir/node_info.log"
-			echo "  Labels containing '${driver}':" >> "$outputFile"
-			echo "$matches" >> "$outputFile"
-			echo "" >> "$outputFile"  # Add a blank line for readability
-			labelFound=true
-			break  # Stop checking if a label is found
-		fi
+
+function get_node_info(){
+	kubectl get nodes -o yaml >> "$tempdir/nodes.yaml"
+	kubectl get csinode -o yaml >> "$tempdir/csinodes.yaml"
+}
+
+function get_dell_sc(){
+	scs=$(kubectl get sc | awk '/dellemc.com/ {print $1}')
+	for sc in $scs; do
+		kubectl get sc "$sc" -o yaml >> "$tempdir/sc-$sc.yaml"
 	done
-	if [ "$labelFound" = false ]; then
-		echo "- Name: $node" >> "$tempdir/node_info.log"
-		echo "  Labels containing CSI driver: None" >> "$tempdir/node_info.log"
-		echo "" >> "$tempdir/node_info.log"
+}
+
+function helm_deployment_details(){
+	# check if helm command is present
+	if command -v helm &> /dev/null; then
+		for ns in "${available_namespaces[@]}"; do
+			releases=$(helm ls -n "$ns" --short)
+			if [ -z "$releases" ]; then
+				echo "No helm releases found in namespace $ns" >> "$tempdir/deployment-method.yaml"
+			else
+				echo "Helm releases found in namespace $ns" >> "$tempdir/deployment-method.yaml"
+				for release in $releases; do
+					helm get values "$release" -n "$ns" -o yaml >> "$tempdir/values-$release.yaml"
+				done
+			fi
+		done
 	fi
-done
+}
 
-# kubectl get pods --all-namespaces -o json | jq -r '.items[] | select(any(.spec.containers[]; any(.env[]; .value == "/var/run/csi/csi.sock"))) | "\(.metadata.namespace) \(.metadata.name)"'
+function operator_deployment_details(){
+	# check if we have
+	crds=$(kubectl get crd | awk '/storage.dell.com/ {print $1}')
+	if [ -z "$crds" ]; then
+		echo "No CRDs found" >> "$tempdir/deployment-method.yaml"
+	else
+		echo "CRDs found: $crds" >> "$tempdir/deployment-method.yaml"
+		for crd in $crds; do
+			kubectl get "$crd" -A -o yaml >> "$tempdir/crd-$crd.yaml"
+		done
+	fi
+}
 
+function get_pod_logs(){
+	for ns in "${available_namespaces[@]}"; do
+		pods=$(kubectl get pods -n "$ns" -o jsonpath='{.items[*].metadata.name}')
+		# TODO add loop for each container later
+		echo "Pods found in namespace $ns: $pods" >> "$tempdir/pods-list.log"
+		for pod in $pods; do
+			kubectl logs "$pod" -n "$ns" >> "$tempdir/$ns-$pod.log"
+		done
+	done
+}
 
-echo "CSINodes Information:" >> "$tempdir/csinode.yaml"
-kubectl get csinode -o yaml >> "$tempdir/csinode.yaml"
+function archive(){
+	if command -v zip &> /dev/null; then
+		zip -r "csm-diag-$(date +%s).zip" "$tempdir"
+	else
+		tar -cf "csm-diag-$(date +%s).tar.gz" "$tempdir"
+	fi
+}
+# main function for the script execution
+function main(){
+	# Default to calling handle_namespaces if no namespaces provided
+	NAMESPACES=""
+
+	while getopts ":n:" opt; do
+		case $opt in
+			n)
+				NAMESPACES="$OPTARG"
+				;;
+			\?)
+				echo "Invalid option: -$OPTARG" >&2
+				exit 1
+				;;
+		esac
+	done
+
+	if [ -z "$NAMESPACES" ]; then
+		get_namespaces $usual_namespaces
+	else
+		handle_namespaces "$NAMESPACES"
+	fi
+	if [ -z "$available_namespaces" ]; then 
+		echo "Could not find any matching namespace"
+		help
+		exit 1
+	fi
+
+	get_node_info
+
+	get_dell_sc
+
+	helm_deployment_details
+
+	operator_deployment_details
+
+	get_pod_logs
+
+	archive
+
+	cleanup
+}
+
+main "$@"
