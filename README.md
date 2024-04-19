@@ -5,15 +5,21 @@ This repository hosts the [kubectl plugin](https://kubernetes.io/docs/tasks/exte
 
 It is inspired by Log3.sh created by [@OA72280](https://github.com/OA72280).
 
+To obtain the script and make it working you can run:
+```shell
+curl -LO https://raw.githubusercontent.com/coulof/kubectl-csm-diag/main/kubectl-csm-diag && chmod +x kubectl-csm-diag
+sudo mv kubectl-csm-diag /usr/local/bin
+```
+
 To run the script just execute:
 ```
 kubectl-csm-diag
 ```
 
-Or
+Or with all the options
 
 ```
-kubectl-csm-diag --namespace dell-csm-operator,powerflex
+kubectl-csm-diag --namespace dell-csm-operator,powerflex -s -v
 ```
 
 ## Archive content
