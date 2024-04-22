@@ -138,6 +138,7 @@ function get_pod_logs(){
 		# TODO add loop for each container later
 		echo "Pods found in namespace $ns: $pods" >> "$tempdir/pods-list.log"
 		for pod in $pods; do
+			kubectl describe pods -n "$ns" >> "$tempdir/$ns-describe-pods.log"
 			# TODO add loop for each container later
 			kubectl logs "$pod" -n "$ns" --all-containers >> "$tempdir/$ns-$pod.log"
 		done
