@@ -29,6 +29,7 @@ The script create an archive (zip or tar) containing:
 * `storage.dell.com` CRs
 * Helm `values.yaml`
 * `StorageClass`, `Node` & `CSINodes` details
+* `Secrets` containing the configuration to the storage backend ; only if the option `-s` is explicitly called
 
 ## TODO
 * [x] Add command options parsing
