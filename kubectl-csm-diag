@@ -47,7 +47,7 @@ function handle_namespaces {
 	available_namespaces=()
 	for namespace in "${NAMESPACE_ARRAY[@]}"; do
 		echo "Namespace: $namespace"
-		available_namespaces+=("$ns") # Add to the list of available namespaces
+		available_namespaces+=("$namespace") # Add to the list of available namespaces
 	done
 }
 
