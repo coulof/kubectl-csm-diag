@@ -158,11 +158,11 @@ function archive() {
   log_verbose "Creating archive"
   archive_name="csm-diag-$(date +%s)"
   if command -v zip &>/dev/null; then
-    zip -r "$archive_name.zip" "$tempdir"
-    log_verbose "Archive created with name $archive_name.zip"
+    zip -q -r "$archive_name.zip" "$tempdir"
+    echo "Archive created with name $archive_name.zip"
   else
     tar -cf "$archive_name.tar" "$tempdir"
-    log_verbose "Archive created with name $archive_name.tar"
+    echo "Archive created with name $archive_name.tar"
   fi
 }
 # main function for the script execution
@@ -205,21 +205,26 @@ function main() {
     help
     exit 1
   fi
-
+  echo "🔍 Get Node info"
   get_node_info
 
+  echo "🗄️ Storage Classes"
   get_dell_sc
 
+  echo "🚢 Deployment details"
   helm_deployment_details
 
   operator_deployment_details
 
+  echo "🧾 Get logs"
   get_pod_logs
 
   if [ "$include_secrets_enabled" = true ]; then
+    echo "🔐 Secret"
     get_secrets
   fi
 
+  echo "🗜️ Archiving"
   archive
 
   cleanup
