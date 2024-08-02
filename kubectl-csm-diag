@@ -201,6 +201,7 @@ function main() {
   done
 
   log_verbose "Verbose mode enabled."
+  echo "🚀 Check Dell CSM namespaces"
   if [ -z "$namespaces" ]; then
     get_namespaces $usual_namespaces
   else
