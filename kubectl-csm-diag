@@ -3,7 +3,7 @@
 # Global variable
 declare -a available_namespaces
 
-usual_namespaces="powerflex,vxflexos,powermax,csi-powermax,powerscale,isilon,unity,powerstore,csi-powerstore,dell-csm,karavi,dell-csm-operator,dell-replication-controller"
+usual_namespaces="powerflex,vxflexos,powermax,powerscale,isilon,unity,powerstore,csi-powerstore,csm,karavi,csm-operator,replication-controller"
 
 tempdir=$(mktemp -d)
 
@@ -55,16 +55,22 @@ function handle_namespaces {
 # Handle namespaces using usual suspects
 function get_namespaces() {
   IFS=',' read -ra NAMESPACE_ARRAY <<<"$1"
+  # Define an array of prefix
+  prefixes=("" "csi-" "dell-" "dell-csi-")
   available_namespaces=()
   log_verbose "Namespace array: ${NAMESPACE_ARRAY[*]}"
   # Loop through each namespace in the list
   # TODO : replace this block with a single query & jq parser for faster execution
+  namespaces=$(kubectl get ns)
   for ns in "${NAMESPACE_ARRAY[@]}"; do
-    # Check if the namespace exists using `kubectl get namespace`
-    if kubectl get namespace "$ns" >/dev/null 2>&1; then
-      log_verbose "Namespace $ns exists"
-      available_namespaces+=("$ns") # Add to the list of available namespaces
-    fi
+    for prefix in "${prefixes[@]}"; do
+      full_ns="${prefix}${ns}"
+      # test if full_ns exists in the first column of namespaces
+      if grep -q "^$full_ns " <<<"$namespaces"; then
+        log_verbose "Namespace $full_ns exists"
+        available_namespaces+=("$full_ns")
+      fi
+    done
   done
 }
 
@@ -87,6 +93,11 @@ function get_dell_sc() {
   log_verbose "Dell storage classes: $scs"
   for sc in $scs; do
     kubectl get sc "$sc" -o yaml >>"$tempdir/sc-$sc.yaml"
+  done
+  vscs=$(kubectl get vsclass | awk '/dellemc.com/ {print $1}')
+  log_verbose "Dell Volume Snapshot classes: $scs"
+  for vscs in $vsc; do
+    kubectl get vsclass "$vsc" -o yaml >>"$tempdir/vsclass-$sc.yaml"
   done
 }
 
@@ -132,10 +143,13 @@ function get_pod_logs() {
   for ns in "${available_namespaces[@]}"; do
     pods=$(kubectl get pods -n "$ns" -o jsonpath='{.items[*].metadata.name}')
     log_verbose "Pods found in namespace $ns: $pods"
-    # TODO add loop for each container later
     echo "Pods found in namespace $ns: $pods" >>"$tempdir/pods-list.log"
+    # get pods describe
+    kubectl get pods -n "$ns" -o wide >>"$tempdir/$ns-describe-pods.log"
+    echo "---" >>"$tempdir/$ns-describe-pods.log"
+    kubectl describe pods -n "$ns" >>"$tempdir/$ns-describe-pods.log"
+    # get logs
     for pod in $pods; do
-      kubectl describe pods -n "$ns" >>"$tempdir/$ns-describe-pods.log"
       # get containers of each pod
       containers=$(kubectl get pod "$pod" -n "$ns" -o jsonpath='{.spec.containers[*].name}')
       for container in $containers; do
