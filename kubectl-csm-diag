@@ -74,6 +74,58 @@ function get_namespaces() {
   done
 }
 
+
+# Describe storageClass related objects
+# TODO: get all other PVC related objects like StatefulSet, Pods, VirtualMachine, etc.
+function _get_sc_objects(){
+  log_verbose "Collecting Dell storage classes"
+  scs=$(kubectl get sc | awk '/dellemc.com/ {print $1}')
+  log_verbose "Dell storage classes: $scs"
+  for sc in $scs; do
+    kubectl get sc "$sc" -o yaml >>"$tempdir/sc-$sc.yaml"
+
+    # Describe PVs in the storage class
+    pvs=$(kubectl get pv | grep $sc | awk '{print $1}')
+    log_verbose "   Dell Persistent Volumes: $pvs"
+    if [ -z "$pvs" ]; then
+      echo "There is no PersistentVolume for StorageClass: $sc" >>"$tempdir/describe-pvs-$sc.yaml"
+    else
+      for pv in $pvs; do
+        kubectl describe pv "$pv" >>"$tempdir/decribe-pvs-$sc.yaml"
+      done
+    fi
+    # Describe PVCs in the storage class
+    has_pvcs=$(kubectl get pvc -A | grep $sc)
+    log_verbose "   Dell Persistent Volume Claims: $pvcs"
+    if [ -z "$has_pvcs" ]; then
+      echo "There is no PersistentVolumeClaims for StorageClass: $sc" >>"$tempdir/describe-pvcs-$sc.yaml"
+    else
+      namespaces=$(kubectl get pvc -A | grep $sc | awk '{print $1}' | sort | uniq)
+      for ns in $namespaces; do
+        kubectl describe pvc -n "$ns" >>"$tempdir/describe-pvcs-$ns-$sc.yaml"
+      done
+    fi
+  done
+}
+
+function _get_vcs_objects(){
+  vscs=$(kubectl get vsclass | awk '/dellemc.com/ {print $1}')
+  log_verbose "Dell Volume Snapshot classes: $scs"
+  for vsc in $vscs; do
+    kubectl get vsclass "$vsc" -o yaml >>"$tempdir/vsclass-$vsc.yaml"
+    vsnaps=$(kubectl get volumesnapshots -A | grep "$vsc")
+    log_verbose "  Dell Volume Snapshots: $vsnaps"
+    if [ -z "$vsnaps" ]; then
+      echo "There is no VolumeSnapshots for VolumeSnapshotClass: $vsc" >>"$tempdir/describe-volumesnapshot-$vsc.yaml"
+    else
+      namespaces=$(kubectl get volumesnapshots -A | grep $vsc | awk '{print $1}' | sort | uniq)
+      for ns in $namespaces; do
+        kubectl describe volumesnapshot -n "$ns" >>"$tempdir/describe-volumesnapshots-$ns-$sc.yaml"
+      done
+    fi
+  done
+}
+
 #function check_prereqs() {
 #	if ! command -v jw &> /dev/null; then
 #		echo "jq could not be found. Please install jq, jq is magic!"
@@ -87,18 +139,10 @@ function get_node_info() {
   kubectl get csinode -o yaml >>"$tempdir/csinodes.yaml"
 }
 
-function get_dell_sc() {
-  log_verbose "Collecting Dell storage classes"
-  scs=$(kubectl get sc | awk '/dellemc.com/ {print $1}')
-  log_verbose "Dell storage classes: $scs"
-  for sc in $scs; do
-    kubectl get sc "$sc" -o yaml >>"$tempdir/sc-$sc.yaml"
-  done
-  vscs=$(kubectl get vsclass | awk '/dellemc.com/ {print $1}')
-  log_verbose "Dell Volume Snapshot classes: $scs"
-  for vscs in $vsc; do
-    kubectl get vsclass "$vsc" -o yaml >>"$tempdir/vsclass-$sc.yaml"
-  done
+# Get All Dell Storage Details
+function get_dell_storage() {
+  _get_sc_objects
+  _get_vcs_objects
 }
 
 function helm_deployment_details() {
@@ -173,7 +217,7 @@ function get_secrets() {
 }
 function archive() {
   log_verbose "Creating archive"
-  archive_name="csm-diag-$(date +%s)"
+  archive_name="csm-diag-$(date +'%Y%m%d_%H%M%S')"
   if command -v zip &>/dev/null; then
     zip -q -r "$archive_name.zip" "$tempdir"
     echo "Archive created with name $archive_name.zip"
@@ -229,8 +273,8 @@ function main() {
   echo "🔍 Get Node info"
   get_node_info
 
-  echo "🗄️ Storage Classes"
-  get_dell_sc
+  echo "🗄️ Dell Storage details (StorageClass, PVCs, PVs, VSClass, VolumeSnapshots)"
+  get_dell_storage
 
   echo "🚢 Deployment details"
   helm_deployment_details
