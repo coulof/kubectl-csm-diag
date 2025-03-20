@@ -103,9 +103,28 @@ function _get_sc_objects(){
       namespaces=$(kubectl get pvc -A | grep $sc | awk '{print $1}' | sort | uniq)
       for ns in $namespaces; do
         kubectl describe pvc -n "$ns" >>"$tempdir/describe-pvcs-$ns-$sc.yaml"
+        # For each pvc in the namespace get the related pod
+        for pvc in $(kubectl get pvc -n $ns -o jsonpath='{.items[*].metadata.name}'); do
+          pods=$(kubectl get pods -n $ns -o json | jq -r --arg pvc "$pvc" '
+            .items[] | select(.spec.volumes[]? | .persistentVolumeClaim.claimName == $pvc) | .metadata.name')
+          for pod in $pods; do
+            echo "Describing pod: $pod"
+            kubectl describe pod $pod -n $ns >>"$tempdir/decribe-pods-with-pvc-$ns-$sc.yaml"
+          done
+        done
       done
     fi
   done
+  # Get VolumeAttachments, pretty useful to see what is connected where
+  log_verbose "Collecting Dell VolumeAttachments"
+  volumeattachments=$(kubectl get volumeattachments.storage.k8s.io | awk '/dellemc.com/ {print $1}')
+  if [ -z "$volumeattachments" ]; then
+    echo "There is no VolumeAttachments" >>"$tempdir/describe-volumeattachments-dellemc.yaml"
+  else
+    for va in $volumeattachments; do
+      kubectl describe volumeattachments.storage.k8s.io "$va" >>"$tempdir/describe-volumeattachments-dellemc.yaml"
+    done
+  fi
 }
 
 function _get_vcs_objects(){
