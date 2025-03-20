@@ -107,8 +107,8 @@ function _get_sc_objects(){
         for pvc in $(kubectl get pvc -n $ns -o jsonpath='{.items[*].metadata.name}'); do
           pods=$(kubectl get pods -n $ns -o json | jq -r --arg pvc "$pvc" '
             .items[] | select(.spec.volumes[]? | .persistentVolumeClaim.claimName == $pvc) | .metadata.name')
+          log_verbose "   Related Pods to the PVC: $pods"
           for pod in $pods; do
-            echo "Describing pod: $pod"
             kubectl describe pod $pod -n $ns >>"$tempdir/decribe-pods-with-pvc-$ns-$sc.yaml"
           done
         done
