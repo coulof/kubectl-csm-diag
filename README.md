@@ -16,10 +16,10 @@ To run the script just execute:
 kubectl-csm-diag
 ```
 
-Or with all the options
+Or with all the options to specify which namespaces you want to capture, if you need the secrets to be captured too & verbose mode:
 
 ```
-kubectl-csm-diag --namespace dell-csm-operator,powerflex -s -v
+kubectl-csm-diag -n dell-csm-operator,powerflex -s -v
 ```
 
 ## Archive content
