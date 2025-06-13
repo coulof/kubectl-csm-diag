@@ -3,7 +3,7 @@
 # Global variable
 declare -a available_namespaces
 
-usual_namespaces="powerflex,vxflexos,powermax,powerscale,isilon,unity,powerstore,csi-powerstore,csm,karavi,csm-operator,replication-controller"
+usual_namespaces="powerflex,vxflexos,powermax,powerscale,isilon,unity,powerstore,csi-powerstore,csm,karavi,csm-operator,replication-controller,authorization"
 
 tempdir=$(mktemp -d)
 
