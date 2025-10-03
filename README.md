@@ -2,9 +2,6 @@
 
 This repository hosts the [kubectl plugin](https://kubernetes.io/docs/tasks/extend-kubectl/kubectl-plugins/) to capture all the information to debug [Dell CSI/CSM](https://dell.github.io/csm-docs/docs/).
 
-
-It is inspired by Log3.sh created by [@OA72280](https://github.com/OA72280).
-
 To obtain the script and make it working you can run:
 ```shell
 curl -LO https://raw.githubusercontent.com/coulof/kubectl-csm-diag/main/kubectl-csm-diag && chmod +x kubectl-csm-diag
