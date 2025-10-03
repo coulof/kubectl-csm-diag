@@ -222,6 +222,20 @@ function get_pod_logs() {
   done
 }
 
+# Obtain configmaps
+function get_configmaps() {
+  log_verbose "Collecting configmaps"
+  for ns in "${available_namespaces[@]}"; do
+    if kubectl get configmaps -n "$ns" -o name | grep -q .; then
+      log_verbose "configmaps found in namespace $ns"
+      kubectl get configmaps -n "$ns" -o yaml >>"$tempdir/configmaps-$ns.yaml"
+    else
+      log_verbose "No configmaps found in namespace $ns"
+      echo "No configmaps found in namespace $ns" >>"$tempdir/configmaps-$ns.yaml"
+    fi
+  done
+}
+
 # Obtain secrets
 function get_secrets() {
   log_verbose "Collecting secrets"
@@ -295,6 +309,14 @@ function main() {
   echo "🗄️ Dell Storage details (StorageClass, PVCs, PVs, VSClass, VolumeSnapshots)"
   get_dell_storage
 
+  if [ "$include_secrets_enabled" = true ]; then
+    echo "🔐 Secret"
+    get_secrets
+  fi
+
+  echo "🗂️ ConfigMap"
+  get_configmaps
+
   echo "🚢 Deployment details"
   helm_deployment_details
 
@@ -302,11 +324,6 @@ function main() {
 
   echo "🧾 Get logs"
   get_pod_logs
-
-  if [ "$include_secrets_enabled" = true ]; then
-    echo "🔐 Secret"
-    get_secrets
-  fi
 
   echo "🗜️ Archiving"
   archive
