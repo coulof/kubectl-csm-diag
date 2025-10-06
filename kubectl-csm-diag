@@ -23,8 +23,10 @@ trap cleanup EXIT INT TERM
 
 _select_k8s_client() {
   if command -v oc &> /dev/null; then
-    k8s_client="oc"
+     k8s_client="oc"
      log_verbose "Found OpenShift client"
+     $k8s_client version | >"$tempdir/openshift-details.log"
+     $k8s_client oc get clusteroperators.config.openshift.io >> "$tempdir/openshift-details.log"
   else
     log_verbose "Use $k8s_client as default client"
   fi
