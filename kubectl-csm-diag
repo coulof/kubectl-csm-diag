@@ -11,12 +11,27 @@ verbose=0
 
 logs_args=""
 
+k8s_client="$k8s_client"
+
 function cleanup() {
   rm -rf "$tempdir"
 }
 
 # Set up a trap to call cleanup when the script exits or is interrupted
 trap cleanup EXIT INT TERM
+
+
+_select_k8s_client() {
+  if command -v oc &> /dev/null; then
+     k8s_client="oc"
+     log_verbose "Found OpenShift client"
+     $k8s_client version | >"$tempdir/openshift-details.log"
+     $k8s_client oc get clusteroperators.config.openshift.io >> "$tempdir/openshift-details.log"
+  else
+    log_verbose "Use $k8s_client as default client"
+  fi
+}
+
 
 # Function to handle verbose output
 log_verbose() {
@@ -61,7 +76,7 @@ function get_namespaces() {
   log_verbose "Namespace array: ${NAMESPACE_ARRAY[*]}"
   # Loop through each namespace in the list
   # TODO : replace this block with a single query & jq parser for faster execution
-  namespaces=$(kubectl get ns)
+  namespaces=$($k8s_client get ns)
   for ns in "${NAMESPACE_ARRAY[@]}"; do
     for prefix in "${prefixes[@]}"; do
       full_ns="${prefix}${ns}"
@@ -79,37 +94,37 @@ function get_namespaces() {
 # TODO: get all other PVC related objects like StatefulSet, Pods, VirtualMachine, etc.
 function _get_sc_objects(){
   log_verbose "Collecting Dell storage classes"
-  scs=$(kubectl get sc | awk '/dellemc.com/ {print $1}')
+  scs=$($k8s_client get sc | awk '/dellemc.com/ {print $1}')
   log_verbose "Dell storage classes: $scs"
   for sc in $scs; do
-    kubectl get sc "$sc" -o yaml >>"$tempdir/sc-$sc.yaml"
+    $k8s_client get sc "$sc" -o yaml >>"$tempdir/sc-$sc.yaml"
 
     # Describe PVs in the storage class
-    pvs=$(kubectl get pv | grep $sc | awk '{print $1}')
+    pvs=$($k8s_client get pv | grep $sc | awk '{print $1}')
     log_verbose "   Dell Persistent Volumes: $pvs"
     if [ -z "$pvs" ]; then
       echo "There is no PersistentVolume for StorageClass: $sc" >>"$tempdir/describe-pvs-$sc.yaml"
     else
       for pv in $pvs; do
-        kubectl describe pv "$pv" >>"$tempdir/decribe-pvs-$sc.yaml"
+        $k8s_client describe pv "$pv" >>"$tempdir/decribe-pvs-$sc.yaml"
       done
     fi
     # Describe PVCs in the storage class
-    has_pvcs=$(kubectl get pvc -A | grep $sc)
+    has_pvcs=$($k8s_client get pvc -A | grep $sc)
     log_verbose "   Dell Persistent Volume Claims: $pvcs"
     if [ -z "$has_pvcs" ]; then
       echo "There is no PersistentVolumeClaims for StorageClass: $sc" >>"$tempdir/describe-pvcs-$sc.yaml"
     else
-      namespaces=$(kubectl get pvc -A | grep $sc | awk '{print $1}' | sort | uniq)
+      namespaces=$($k8s_client get pvc -A | grep $sc | awk '{print $1}' | sort | uniq)
       for ns in $namespaces; do
-        kubectl describe pvc -n "$ns" >>"$tempdir/describe-pvcs-$ns-$sc.yaml"
+        $k8s_client describe pvc -n "$ns" >>"$tempdir/describe-pvcs-$ns-$sc.yaml"
         # For each pvc in the namespace get the related pod
-        for pvc in $(kubectl get pvc -n $ns -o jsonpath='{.items[*].metadata.name}'); do
-          pods=$(kubectl get pods -n $ns -o json | jq -r --arg pvc "$pvc" '
+        for pvc in $($k8s_client get pvc -n $ns -o jsonpath='{.items[*].metadata.name}'); do
+          pods=$($k8s_client get pods -n $ns -o json | jq -r --arg pvc "$pvc" '
             .items[] | select(.spec.volumes[]? | .persistentVolumeClaim.claimName == $pvc) | .metadata.name')
           log_verbose "   Related Pods to the PVC: $pods"
           for pod in $pods; do
-            kubectl describe pod $pod -n $ns >>"$tempdir/decribe-pods-with-pvc-$ns-$sc.yaml"
+            $k8s_client describe pod $pod -n $ns >>"$tempdir/decribe-pods-with-pvc-$ns-$sc.yaml"
           done
         done
       done
@@ -117,29 +132,29 @@ function _get_sc_objects(){
   done
   # Get VolumeAttachments, pretty useful to see what is connected where
   log_verbose "Collecting Dell VolumeAttachments"
-  volumeattachments=$(kubectl get volumeattachments.storage.k8s.io | awk '/dellemc.com/ {print $1}')
+  volumeattachments=$($k8s_client get volumeattachments.storage.k8s.io | awk '/dellemc.com/ {print $1}')
   if [ -z "$volumeattachments" ]; then
     echo "There is no VolumeAttachments" >>"$tempdir/describe-volumeattachments-dellemc.yaml"
   else
     for va in $volumeattachments; do
-      kubectl describe volumeattachments.storage.k8s.io "$va" >>"$tempdir/describe-volumeattachments-dellemc.yaml"
+      $k8s_client describe volumeattachments.storage.k8s.io "$va" >>"$tempdir/describe-volumeattachments-dellemc.yaml"
     done
   fi
 }
 
 function _get_vcs_objects(){
-  vscs=$(kubectl get vsclass | awk '/dellemc.com/ {print $1}')
+  vscs=$($k8s_client get vsclass | awk '/dellemc.com/ {print $1}')
   log_verbose "Dell Volume Snapshot classes: $scs"
   for vsc in $vscs; do
-    kubectl get vsclass "$vsc" -o yaml >>"$tempdir/vsclass-$vsc.yaml"
-    vsnaps=$(kubectl get volumesnapshots -A | grep "$vsc")
+    $k8s_client get vsclass "$vsc" -o yaml >>"$tempdir/vsclass-$vsc.yaml"
+    vsnaps=$($k8s_client get volumesnapshots -A | grep "$vsc")
     log_verbose "  Dell Volume Snapshots: $vsnaps"
     if [ -z "$vsnaps" ]; then
       echo "There is no VolumeSnapshots for VolumeSnapshotClass: $vsc" >>"$tempdir/describe-volumesnapshot-$vsc.yaml"
     else
-      namespaces=$(kubectl get volumesnapshots -A | grep $vsc | awk '{print $1}' | sort | uniq)
+      namespaces=$($k8s_client get volumesnapshots -A | grep $vsc | awk '{print $1}' | sort | uniq)
       for ns in $namespaces; do
-        kubectl describe volumesnapshot -n "$ns" >>"$tempdir/describe-volumesnapshots-$ns-$sc.yaml"
+        $k8s_client describe volumesnapshot -n "$ns" >>"$tempdir/describe-volumesnapshots-$ns-$sc.yaml"
       done
     fi
   done
@@ -154,8 +169,8 @@ function _get_vcs_objects(){
 
 function get_node_info() {
   log_verbose "Collecting node info"
-  kubectl get nodes -o yaml >>"$tempdir/nodes.yaml"
-  kubectl get csinode -o yaml >>"$tempdir/csinodes.yaml"
+  $k8s_client get nodes -o yaml >>"$tempdir/nodes.yaml"
+  $k8s_client get csinode -o yaml >>"$tempdir/csinodes.yaml"
 }
 
 # Get All Dell Storage Details
@@ -188,7 +203,7 @@ function helm_deployment_details() {
 function operator_deployment_details() {
   log_verbose "Checking for operator deployments"
   # check if we have Dell CRDs
-  crds=$(kubectl get crd | awk '/storage.dell.com/ {print $1}')
+  crds=$($k8s_client get crd | awk '/storage.dell.com/ {print $1}')
   if [ -z "$crds" ]; then
     log_verbose "No CRDs found"
     echo "No CRDs found" >>"$tempdir/deployment-method.yaml"
@@ -196,7 +211,7 @@ function operator_deployment_details() {
     log_verbose "CRDs found: $crds"
     echo "CRDs found: $crds" >>"$tempdir/deployment-method.yaml"
     for crd in $crds; do
-      kubectl get "$crd" -A -o yaml >>"$tempdir/crd-$crd.yaml"
+      $k8s_client get "$crd" -A -o yaml >>"$tempdir/crd-$crd.yaml"
     done
   fi
 }
@@ -204,19 +219,19 @@ function operator_deployment_details() {
 function get_pod_logs() {
   log_verbose "Collecting pod logs"
   for ns in "${available_namespaces[@]}"; do
-    pods=$(kubectl get pods -n "$ns" -o jsonpath='{.items[*].metadata.name}')
+    pods=$($k8s_client get pods -n "$ns" -o jsonpath='{.items[*].metadata.name}')
     log_verbose "Pods found in namespace $ns: $pods"
     echo "Pods found in namespace $ns: $pods" >>"$tempdir/pods-list.log"
     # get pods describe
-    kubectl get pods -n "$ns" -o wide >>"$tempdir/$ns-describe-pods.log"
+    $k8s_client get pods -n "$ns" -o wide >>"$tempdir/$ns-describe-pods.log"
     echo "---" >>"$tempdir/$ns-describe-pods.log"
-    kubectl describe pods -n "$ns" >>"$tempdir/$ns-describe-pods.log"
+    $k8s_client describe pods -n "$ns" >>"$tempdir/$ns-describe-pods.log"
     # get logs
     for pod in $pods; do
       # get containers of each pod
-      containers=$(kubectl get pod "$pod" -n "$ns" -o jsonpath='{.spec.containers[*].name}')
+      containers=$($k8s_client get pod "$pod" -n "$ns" -o jsonpath='{.spec.containers[*].name}')
       for container in $containers; do
-        kubectl logs $logs_args "$pod" -n "$ns" -c "$container" >>"$tempdir/$ns-$pod-$container.log"
+        $k8s_client logs $logs_args "$pod" -n "$ns" -c "$container" >>"$tempdir/$ns-$pod-$container.log"
       done
     done
   done
@@ -226,9 +241,9 @@ function get_pod_logs() {
 function get_configmaps() {
   log_verbose "Collecting configmaps"
   for ns in "${available_namespaces[@]}"; do
-    if kubectl get configmaps -n "$ns" -o name | grep -q .; then
+    if $k8s_client get configmaps -n "$ns" -o name | grep -q .; then
       log_verbose "configmaps found in namespace $ns"
-      kubectl get configmaps -n "$ns" -o yaml >>"$tempdir/configmaps-$ns.yaml"
+      $k8s_client get configmaps -n "$ns" -o yaml >>"$tempdir/configmaps-$ns.yaml"
     else
       log_verbose "No configmaps found in namespace $ns"
       echo "No configmaps found in namespace $ns" >>"$tempdir/configmaps-$ns.yaml"
@@ -240,11 +255,11 @@ function get_configmaps() {
 function get_secrets() {
   log_verbose "Collecting secrets"
   for ns in "${available_namespaces[@]}"; do
-    secrets=$(kubectl get secrets -n "$ns" | awk '/Opaque/ {print $1}')
+    secrets=$($k8s_client get secrets -n "$ns" | awk '/Opaque/ {print $1}')
     log_verbose "Secrets found in namespace $ns: $secrets"
     for secret in $secrets; do
       echo "---" >>"$tempdir/secrets-$ns.yaml"
-      kubectl get secret -n "$ns" "$secret" -o yaml >>"$tempdir/secrets-$ns.yaml"
+      $k8s_client get secret -n "$ns" "$secret" -o yaml >>"$tempdir/secrets-$ns.yaml"
     done
   done
 }
@@ -292,6 +307,7 @@ function main() {
   done
 
   log_verbose "Verbose mode enabled."
+  _select_k8s_client
   echo "🚀 Check Dell CSM namespaces"
   if [ -z "$namespaces" ]; then
     get_namespaces $usual_namespaces
