@@ -27,8 +27,12 @@ _select_k8s_client() {
      log_verbose "Found OpenShift client"
      $k8s_client version | >"$tempdir/openshift-details.log"
      $k8s_client oc get clusteroperators.config.openshift.io >> "$tempdir/openshift-details.log"
+  if command -v kubectl &> /dev/null; then
+     k8s_client="kubectl"
+     log_verbose "Found kubectl client"
   else
-    log_verbose "Use $k8s_client as default client"
+    echo "No k8s (oc or kubectl) client found. Please make sure one of them is in your path."
+    exit 1
   fi
 }
 
