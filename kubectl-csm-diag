@@ -26,8 +26,8 @@ _select_k8s_client() {
      k8s_client="oc"
      log_verbose "Found OpenShift client"
      $k8s_client version | >"$tempdir/openshift-details.log"
-     $k8s_client oc get clusteroperators.config.openshift.io >> "$tempdir/openshift-details.log"
-  if command -v kubectl &> /dev/null; then
+     $k8s_client get clusteroperators.config.openshift.io >> "$tempdir/openshift-details.log"
+  elif command -v kubectl &> /dev/null; then
      k8s_client="kubectl"
      log_verbose "Found kubectl client"
   else
