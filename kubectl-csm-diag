@@ -175,6 +175,7 @@ function get_node_info() {
   log_verbose "Collecting node info"
   $k8s_client get nodes -o yaml >>"$tempdir/nodes.yaml"
   $k8s_client get csinode -o yaml >>"$tempdir/csinodes.yaml"
+  $k8s_client get csidrivers -o yaml >>"$tempdir/csidrivers.yaml"
 }
 
 # Get All Dell Storage Details
